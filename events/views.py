@@ -1,6 +1,6 @@
 from django.shortcuts import render
 from django.contrib.auth import login
-from .serializers import EventSerializer,RegistrationSerializer,LoginSerializer,ReservationSerializer
+from .serializers import EventSerializer,RegistrationSerializer,LoginSerializer,ReservationSerializer,EventAttendees
 from django.contrib.auth import authenticate, get_user_model
 from rest_framework import serializers, status
 from rest_framework.response import Response
@@ -9,10 +9,26 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.permissions import AllowAny,IsAuthenticated
+from .permissions import IsOwnerOrReadOnly
 # Create your views here.
 from .models import Event,Reservation
 from rest_framework.authentication import SessionAuthentication
 from django.db import transaction
+from rest_framework.decorators import action
+
+from rest_framework import permissions
+
+# class IsOwnerOrReadOnly(permissions.BasePermission):
+#     """
+#     Custom permission to only allow owners of an object to edit it.
+#     """
+#     def has_object_permission(self, request, view, obj):
+#         # Read permissions are allowed to any request
+#         if request.method in permissions.SAFE_METHODS:
+#             return True
+
+#         # Write permissions are only allowed to the owner of the object
+#         return obj.owner == request.user   
 
 @method_decorator(csrf_exempt, name='dispatch')
 class RegisterView(APIView):
@@ -47,9 +63,9 @@ class Events(ModelViewSet):
     serializeration is handled here.
     '''
     
-    permission_classes = [IsAuthenticated]
-    queryset = Event.objects.all()
+    permission_classes = [IsAuthenticated,IsOwnerOrReadOnly]
     authentication_classes = [SessionAuthentication]
+    queryset = Event.objects.all()
     serializer_class = EventSerializer
     
     def perform_create(self, serializer):
@@ -71,7 +87,20 @@ class Events(ModelViewSet):
     but i create directly using model. since serializer already has model. 
     '''
 
-class Reservation(ModelViewSet):
+    # /events/{id}/attendees/
+    @action(detail=True, methods=['get'])
+    def attendees(self, request,pk = None):
+        my_event = self.get_object()
+        print(f'all the events {my_event}')
+        query = Reservation.objects.filter(event = my_event)
+        print(f'all the reservations {query}')
+        serializer = EventAttendees(query, many=True)
+        # serializer.is_valid(raise_exception=True)
+        return Response(serializer.data,status=status.HTTP_202_ACCEPTED)
+    
+
+
+class ReservationView(ModelViewSet):
     '''
     this is a post request/
     i have to run service before proceeding with response. do i over-ride entire create? 
@@ -83,7 +112,6 @@ class Reservation(ModelViewSet):
     but for now i am going with - locking specific event. decrementing and creating the reservation then releasing the lock.
     '''
     queryset = Reservation.objects.all()
-
     serializer_class = ReservationSerializer
     permission_classes = [IsAuthenticated]
     authentication_classes = [SessionAuthentication]
