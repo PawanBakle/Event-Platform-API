@@ -54,7 +54,8 @@ class Event(models.Model):
 # as of now going with 1 user can book only 1 event at a time.
 class Reservation(models.Model):
     reserved_by = models.ForeignKey(CustomUser,on_delete=models.CASCADE)
-    reservation_date = models.DateTimeField(auto_now_add=True)
+    reservation_date = models.DateTimeField(auto_now_add=True) # not required? since i don't have multiple dates feature
     event = models.ForeignKey(Event, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
+    created_at = models.DateTimeField(auto_now_add=True) # write only
+
+
