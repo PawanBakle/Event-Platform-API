@@ -9,13 +9,13 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.permissions import AllowAny,IsAuthenticated
-from .permissions import IsOwnerOrReadOnly
+from .permissions import IsOwnerOrReadOnly,IsBookedOrReadOnly
 # Create your views here.
 from .models import Event,Reservation
 from rest_framework.authentication import SessionAuthentication
 from django.db import transaction
 from rest_framework.decorators import action
-
+from rest_framework import filters
 from rest_framework import permissions
 
 # class IsOwnerOrReadOnly(permissions.BasePermission):
@@ -65,28 +65,21 @@ class Events(ModelViewSet):
     
     permission_classes = [IsAuthenticated,IsOwnerOrReadOnly]
     authentication_classes = [SessionAuthentication]
+    search_fields = ['title','city']
+    filter_backends = (filters.SearchFilter,)
     queryset = Event.objects.all()
     serializer_class = EventSerializer
+
+    def get_queryset(self):
+        if self.action == 'retrieve':
+            return Event.objects.select_related('event').all()
+        return Event.objects.all().order_by('city_date_time')
     
     def perform_create(self, serializer):
         print(f'user - {self.request.user}')
         # how to access organizer here? 
         # get the specific event. since it's a post but event has not been created yet. 
         serializer.save(organizer = self.request.user) # do i need to send other data as well? nope. 
-
-
-    '''
-    so i have provided serializer class
-    obj is created - 
-    it goes directly to the post method i.e create method
-    it uses the serializer i have provided - 
-    it then proceeds to create but since i have over-ridden perform create 
-
-
-    what does perform create do? what i usually do in create in serializer. create the model. 
-    but i create directly using model. since serializer already has model. 
-    '''
-
     # /events/{id}/attendees/
     @action(detail=True, methods=['get'])
     def attendees(self, request,pk = None):
@@ -98,8 +91,48 @@ class Events(ModelViewSet):
         # serializer.is_valid(raise_exception=True)
         return Response(serializer.data,status=status.HTTP_202_ACCEPTED)
     
+    @action(detail=False, methods = ['get'])
+    def summary(self, request):
+        '''
+        Aggregate stats across the requester's own events: 
+        total events, total reservations received, seats still open.
 
+        -----------------------------------------------------
+        > since complete information is not provided. should i like compute across all events?
+        if organizer has 3 events. do i need a separate summary for each event? or do i need a
+        total across all the events?
 
+        > if i am looping i can just as well compute for each event but that's not optimized for now. 
+        '''
+
+        '''
+        1. total events ☑️
+        2. total reservations (for each?) ☑️ 
+        3. seats still open (for each?) ☑️
+        -----
+
+        '''
+        # my_event = self.get_object() # get current event object
+        event_summary = Event.objects.filter(organizer = request.user) #[1,3,4]
+        print(f'total events - {event_summary}')
+        total_summary = {}
+        total_summary['total-events-created'] = f"{len(event_summary)} Events total"
+        total_summary[f"Reservations per event"] = []
+        # reserved_seats = Reservation.objects.filter(event = my_event) # seats reserved for the event
+        for each_event in (event_summary):
+            print(f'testing for {each_event.title}')
+            # for each event get the reservations booked
+            reserved_seats = Reservation.objects.filter(event = each_event)
+            total_summary[f"Reservations per event"].append(f'\nEvent {each_event} had {len(reserved_seats)} seats reserved out of {each_event.capacity}')
+            if each_event.capacity > len(reserved_seats):
+                seats_left = each_event.capacity - len(reserved_seats)
+                total_summary[f"Seats-left-for-Event {each_event}"] = seats_left
+            else:
+                seats_left = len(reserved_seats) - each_event.capacity 
+            total_summary[f"Seats-left-for-Event {each_event}"] = seats_left
+        return Response(total_summary,status=status.HTTP_200_OK)
+        
+        # for capacity left gotta use reservation to fetch how many users have reserved for the event
 class ReservationView(ModelViewSet):
     '''
     this is a post request/
@@ -113,9 +146,10 @@ class ReservationView(ModelViewSet):
     '''
     queryset = Reservation.objects.all()
     serializer_class = ReservationSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated,IsBookedOrReadOnly]
     authentication_classes = [SessionAuthentication]
-
+    def get_queryset(self):
+        return Reservation.objects.filter(reserved_by=self.request.user)
     def create(self, request):
         print(f'sending {request} vs sending {request.user}')
 
